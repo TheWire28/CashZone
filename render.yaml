@@ -1,0 +1,16 @@
+# Render Blueprint: one scheduled job that pulls games, stores picks and grades results.
+services:
+  - type: cron
+    name: cashzone-engine
+    runtime: node
+    rootDir: engine
+    schedule: "*/30 * * * *"   # every 30 minutes
+    buildCommand: npm install
+    startCommand: node src/run.js sync
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SUPABASE_URL
+        sync: false            # you paste this in Render's dashboard
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false            # secret: never put it in the repo or in Netlify
