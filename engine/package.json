@@ -1,0 +1,15 @@
+{
+  "name": "cashzone-engine",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "sync": "node src/run.js sync",
+    "sync:local": "node src/run.js sync --local",
+    "backtest": "node src/run.js backtest --local",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}
