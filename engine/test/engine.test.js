@@ -7,6 +7,7 @@ import { sync } from '../src/pipeline.js';
 import { createMemoryStore } from '../src/store-memory.js';
 
 const lg = LEAGUES.nfl;
+const DAY = 864e5;
 
 // Builds a feed event in the same shape the real scoreboard returns.
 function event({ id, date, week, year = 2026, state = 'post', home, away, hs = '0', as = '0', odds }) {
@@ -78,7 +79,7 @@ test('sync: picks lock at kickoff and are graded once the game is final', async 
   const first = await sync(lg, store, { now: new Date('2026-11-16T22:00Z'), fetchJson });
   assert.equal(first.picks_stored, 1, 'next week is picked on the very first run');
   assert.equal(first.picks_graded, 0, 'history is never graded: the record starts clean');
-  const pick = (await store.listPredictions('nfl')).get('nfl:500');
+  const pick = (await store.getPredictions(['nfl:500'])).get('nfl:500');
   assert.equal(pick.pick_winner, 'nfl:1');
   assert.equal(pick.market_spread_home, -3);
 
@@ -86,10 +87,53 @@ test('sync: picks lock at kickoff and are graded once the game is final', async 
   const later = await sync(lg, store, { now: new Date('2026-11-23T02:00Z'), fetchJson });
   assert.equal(later.picks_stored, 0, 'a finished game is not re-picked');
   assert.equal(later.picks_graded, 1);
-  assert.deepEqual((await store.listPredictions('nfl')).get('nfl:500'), pick, 'the stored pick did not change after kickoff');
+  assert.deepEqual((await store.getPredictions(['nfl:500'])).get('nfl:500'), pick, 'the stored pick did not change after kickoff');
+  assert.equal(later.games_rated, 1, 'only the newly finished game is added to the ratings');
   const snap = store.snapshot(new Date('2026-11-23T02:00Z'));
   assert.deepEqual(snap.record.find((r) => r.market === 'winner' && r.win === 'all'), { league: 'nfl', win: 'all', market: 'winner', wins: 1, losses: 0, pushes: 0 });
 
   const again = await sync(lg, store, { now: new Date('2026-11-23T03:00Z'), fetchJson });
   assert.equal(again.picks_graded, 0, 'a game is graded only once');
+  assert.equal(again.games_rated, 0, 'a game is rated only once');
+});
+
+test('ratings saved and reloaded continue exactly where they left off', () => {
+  const games = Array.from({ length: 12 }, (_, i) => ({ home_team: `t${i % 4}`, away_team: `t${(i + 1 + (i % 3)) % 4}`, home_score: 20 + (i * 7) % 13, away_score: 14 + (i * 5) % 17, neutral_site: false, season: i < 6 ? 2025 : 2026 }));
+  const straight = new Ratings(lg);
+  for (const g of games) straight.add(g);
+  const first = new Ratings(lg);
+  for (const g of games.slice(0, 7)) first.add(g);
+  const resumed = Ratings.fromState(lg, JSON.parse(JSON.stringify(first.toState('nfl'))));
+  for (const g of games.slice(7)) resumed.add(g);
+  const next = { home_team: 't0', away_team: 't2', neutral_site: false, season: 2026 };
+  assert.deepEqual(resumed.predict(next), straight.predict(next));
+});
+
+test('college: games against teams outside the division are skipped', () => {
+  const e = event({ id: '7', date: '2026-11-14T18:00Z', week: 11, home: '1', away: '2' });
+  assert.equal(normalizeEvent(LEAGUES.ncaab, e), null, 'no conference on either team');
+  for (const c of e.competitions[0].competitors) c.team.conferenceId = '4';
+  assert.equal(normalizeEvent(LEAGUES.ncaab, e).game.league, 'ncaab');
+  e.competitions[0].type = { abbreviation: 'ALLSTAR' };
+  assert.equal(normalizeEvent(LEAGUES.ncaab, e), null, 'all-star games are skipped');
+});
+
+test('day leagues: first run loads history, later runs ask only for nearby days', async () => {
+  const store = createMemoryStore();
+  const asked = [];
+  const now = new Date('2026-11-16T22:00Z');
+  const fetchJson = async (url) => {
+    const d = new URL(url).searchParams.get('dates');
+    asked.push(d);
+    const events = [];
+    if (d === '202610') events.push({ ...event({ id: '1', date: '2026-10-20T23:00Z', home: '1', away: '2', hs: '110', as: '99' }), season: { year: 2027, type: 2 } });
+    if (d === '20261117') events.push({ ...event({ id: '2', date: '2026-11-18T00:00Z', home: '2', away: '1', state: 'pre', odds: { spread: -2.5, overUnder: 221.5 } }), season: { year: 2027, type: 2 } });
+    return { events };
+  };
+  const first = await sync(LEAGUES.nba, store, { now, fetchJson });
+  assert.ok(asked.includes('202610') && asked.includes('202510'), 'history is requested by month');
+  assert.deepEqual([first.games_rated, first.picks_stored], [1, 1]);
+  asked.length = 0;
+  await sync(LEAGUES.nba, store, { now: new Date(now.getTime() + 30 * 60e3), fetchJson });
+  assert.deepEqual(asked.sort(), ['20261115', '20261116', '20261117', '20261118', '20261119'], 'yesterday through three days ahead, in US Eastern days');
 });

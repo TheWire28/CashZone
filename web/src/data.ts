@@ -29,21 +29,35 @@ export const configured = Boolean(url && key);
 // Supabase returns a one-to-one relation as an object or a one-item list depending on version.
 const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? v[0] ?? null : v ?? null);
 
-export async function loadBoard(): Promise<Board> {
+export const LEAGUES = [
+  { key: 'nfl', name: 'NFL', back: 8, ahead: 8 },
+  { key: 'ncaaf', name: 'NCAAF', back: 8, ahead: 8 },
+  { key: 'nhl', name: 'NHL', back: 2, ahead: 3 },
+  { key: 'nba', name: 'NBA', back: 2, ahead: 3 },
+  { key: 'ncaab', name: 'NCAAB', back: 1, ahead: 2 },
+] as const;
+export type LeagueKey = (typeof LEAGUES)[number]['key'];
+
+export async function loadBoard(league: LeagueKey): Promise<Board> {
+  const lg = LEAGUES.find((l) => l.key === league)!;
+  const from = new Date(Date.now() - lg.back * 864e5).toISOString();
+  const to = new Date(Date.now() + lg.ahead * 864e5).toISOString();
   if (!configured) {
     // Local development only: a snapshot written by `npm run sync:local` in /engine.
     if (import.meta.env.DEV) {
       const res = await fetch('/dev-snapshot.json');
-      if (res.ok) return res.json();
+      if (res.ok) {
+        const snap: Board = await res.json();
+        return { ...snap, games: snap.games.filter((g) => g.league === league && g.start_time >= from && g.start_time <= to) };
+      }
     }
     throw new Error('not-configured');
   }
   const db = createClient(url!, key!, { auth: { persistSession: false } });
-  const since = new Date(Date.now() - 10 * 864e5).toISOString();
   const [games, record, runs] = await Promise.all([
     db.from('games')
       .select('*, home:teams!games_home_team_fkey(*), away:teams!games_away_team_fkey(*), prediction:predictions(*), grade:grades(*)')
-      .gte('start_time', since).order('start_time').limit(400),
+      .eq('league', league).gte('start_time', from).lte('start_time', to).order('start_time').order('id').limit(1000),
     db.from('v_record').select('*'),
     db.from('runs').select('finished_at').eq('ok', true).order('finished_at', { ascending: false }).limit(1),
   ]);

@@ -8,7 +8,9 @@ Model picks, fair odds and a public record of how they did. Installable on your 
 | `engine/` | The job that pulls games, makes picks and grades them | Render (every 30 min) |
 | `supabase/` | The database tables | Supabase |
 
-**Phase 1 covers the NFL.** Other leagues plug into `engine/src/leagues.js`.
+**Leagues:** NFL, college football (FBS and FCS), NHL, NBA and men's college basketball (Division I). Each one is a block in `engine/src/leagues.js`.
+
+Each league's settings (how fast ratings move, home edge, points per rating point) were fitted on last season's and this season's results. On those same games the model picked the straight-up winner about 67% of the time in the NFL, 70% in college football, 58% in the NHL, 69% in the NBA and 69% in college basketball. Those figures are a little flattering because the settings were tuned on the games they are measured on; the live record in the app is the honest number. Spread and total picks have no backtest (the feed does not keep old lines), and the model is weakest on lopsided college matchups.
 
 ## How a pick is made
 
@@ -22,13 +24,13 @@ Model picks, fair odds and a public record of how they did. Installable on your 
 
 ### 1. Supabase (database)
 1. Create a project at supabase.com.
-2. Open **SQL Editor**, paste all of `supabase/migrations/001_init.sql`, press **Run**.
+2. Open **SQL Editor** and run each file in `supabase/migrations/` in order (`001_init.sql`, then `002_leagues.sql`).
 3. Open **Project Settings → API** and keep the page open. You need the Project URL, the `anon` public key and the `service_role` secret key.
 
 ### 2. Render (the engine)
 1. At render.com choose **New → Blueprint** and pick this repo. Render reads `render.yaml`.
 2. When asked, paste `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
-3. Open the `cashzone-engine` job and press **Trigger Run**. The first run loads last season plus this season (about a minute) and stores picks for the upcoming games.
+3. Open the `cashzone-engine` job and press **Trigger Run**. The first run loads last season plus this season for every league (a minute or two) and stores picks for the upcoming games. Later runs only apply newly finished games.
 
 ### 3. Netlify (the app)
 1. At netlify.com choose **Add new site → Import an existing project** and pick this repo. `netlify.toml` fills in the build settings.

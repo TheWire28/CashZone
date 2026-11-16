@@ -4,7 +4,7 @@
 // v1 is deliberately simple and honest:
 //   - who wins and by how much: Elo ratings with margin of victory + home field
 //   - how many points: each team's scoring for/against, shrunk toward league average
-export const MODEL_VERSION = 'elo-pts-v1';
+export const MODEL_VERSION = 'elo-pts-v2';
 
 const round1 = (x) => Math.round(x * 10) / 10;
 
@@ -62,8 +62,9 @@ export class Ratings {
       shrunk(h.pf, h.n) + shrunk(a.pa, a.n) - lg + (shrunk(a.pf, a.n) + shrunk(h.pa, h.n) - lg),
       lg,
     );
-    const home = Math.max((total + margin) / 2, 3);
-    const away = Math.max((total - margin) / 2, 3);
+    const floor = cfg.minScore ?? 0;
+    const home = Math.max((total + margin) / 2, floor);
+    const away = Math.max((total - margin) / 2, floor);
 
     const homeWins = p >= 0.5;
     const out = {
@@ -114,15 +115,31 @@ export class Ratings {
     this.lgPts += g.home_score + g.away_score; this.lgN += 2;
   }
 
-  snapshot(league) {
+  // Everything needed to pick up where we left off, in the shape the database stores.
+  toState(league) {
     const lg = this.leagueAvg();
-    return [...this.teams.entries()].map(([team_id, t]) => ({
-      team_id, league,
-      rating: round1(t.elo),
-      off: round1(t.n ? t.pf / t.n : lg),
-      def: round1(t.n ? t.pa / t.n : lg),
-      games: t.games,
-    }));
+    return {
+      league: { season: this.season, lg_pts: this.lgPts, lg_n: this.lgN },
+      teams: [...this.teams.entries()].map(([team_id, t]) => ({
+        team_id, league,
+        rating: Math.round(t.elo * 1000) / 1000,
+        off: round1(t.n ? t.pf / t.n : lg),
+        def: round1(t.n ? t.pa / t.n : lg),
+        games: t.games, pf: t.pf, pa: t.pa, n: t.n,
+      })),
+    };
+  }
+
+  static fromState(cfg, state) {
+    const r = new Ratings(cfg);
+    if (!state?.league) return r;
+    r.season = state.league.season ?? null;
+    r.lgPts = Number(state.league.lg_pts) || 0;
+    r.lgN = Number(state.league.lg_n) || 0;
+    for (const t of state.teams || []) {
+      r.teams.set(t.team_id, { elo: Number(t.rating), pf: Number(t.pf) || 0, pa: Number(t.pa) || 0, n: Number(t.n) || 0, games: t.games || 0 });
+    }
+    return r;
   }
 }
 

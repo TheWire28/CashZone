@@ -44,6 +44,18 @@ section { margin-bottom: 28px; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .row h2 { margin: 0; }
 
+.leagues { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px 20px; padding: 2px 16px 8px; scrollbar-width: none; }
+.leagues::-webkit-scrollbar { display: none; }
+.leagues button {
+  flex: 0 0 auto; min-height: 40px; padding: 8px 16px; border-radius: 12px; font-weight: 700; color: var(--dim);
+  border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.05);
+}
+.leagues button.on {
+  color: #04140d; border-color: transparent; background: linear-gradient(180deg, #5cf0b9, #22c58a);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 3px 0 #0f7a54;
+}
+.more { text-align: center; margin: 16px 0 0; }
+
 .card {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.03));
   border: 1px solid var(--edge);
