@@ -31,7 +31,8 @@ async function main() {
       const summary = await sync(lg, store, { log });
       log(`[${lg.key}]`, JSON.stringify(summary));
       if (cmd === 'backtest') {
-        const finals = (await store.listGames(lg.key)).filter((g) => g.status === 'final')
+        if (!local) throw new Error('Run backtest with --local; it reads the games from memory.');
+        const finals = [...store._raw.games.values()].filter((g) => g.league === lg.key && g.status === 'final')
           .sort((a, b) => a.start_time.localeCompare(b.start_time));
         const season = Math.max(...finals.map((g) => g.season));
         log(`[${lg.key}] backtest, ${season} season:`, JSON.stringify(backtest(finals, lg, { fromSeason: season }), null, 2));
@@ -49,7 +50,7 @@ async function main() {
     for (const g of snap.games.filter((x) => x.prediction && x.status === 'scheduled')) {
       const p = g.prediction;
       const pick = p.pick_winner === g.home_team ? g.home.abbr : g.away.abbr;
-      log(`${g.start_time.slice(0, 16)}  ${g.away.abbr.padEnd(3)} @ ${g.home.abbr.padEnd(3)}  ${p.proj_away}-${p.proj_home}  pick ${pick} ${(p.confidence * 100).toFixed(0)}%  fair ${p.fair_odds > 0 ? '+' : ''}${p.fair_odds}`);
+      log(`${g.league.padEnd(5)} ${g.start_time.slice(0, 16)}  ${g.away.abbr.padEnd(3)} @ ${g.home.abbr.padEnd(3)}  ${p.proj_away}-${p.proj_home}  pick ${pick} ${(p.confidence * 100).toFixed(0)}%  fair ${p.fair_odds > 0 ? '+' : ''}${p.fair_odds}`);
     }
     const out = new URL('../../web/public/dev-snapshot.json', import.meta.url);
     await writeFile(out, JSON.stringify(snap)).then(() => log('Wrote web/public/dev-snapshot.json for local preview.'), () => {});

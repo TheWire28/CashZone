@@ -28,28 +28,35 @@ export function recordRows(games, grades, now = new Date()) {
 }
 
 export function createMemoryStore() {
-  const teams = new Map(), games = new Map(), predictions = new Map(), grades = new Map(), ratings = new Map();
+  const teams = new Map(), games = new Map(), predictions = new Map(), grades = new Map();
+  const ratingState = new Map(), rated = new Set();
   const runs = [];
+  const inLeague = (league) => [...games.values()].filter((g) => g.league === league);
   return {
-    async countFinals(league) { return [...games.values()].filter((g) => g.league === league && g.status === 'final').length; },
+    async countFinals(league) { return inLeague(league).filter((g) => g.status === 'final').length; },
     async upsertTeams(rows) { for (const r of rows) teams.set(r.id, { ...teams.get(r.id), ...r }); },
     async upsertGames(rows) { for (const r of rows) games.set(r.id, { ...games.get(r.id), ...r }); },
-    async listGames(league) { return [...games.values()].filter((g) => g.league === league); },
+    async listGamesBetween(league, from, to) { return inLeague(league).filter((g) => g.start_time >= from && g.start_time <= to); },
+    async listUnratedFinals(league) { return inLeague(league).filter((g) => g.status === 'final' && !rated.has(g.id)); },
+    async loadRatingState(league) { return ratingState.get(league) || null; },
+    async saveRatingState(league, state, gameIds) {
+      ratingState.set(league, JSON.parse(JSON.stringify(state)));
+      for (const id of gameIds) rated.add(id);
+    },
     async upsertPredictions(rows) {
       for (const r of rows) predictions.set(r.game_id, { created_at: r.updated_at, ...predictions.get(r.game_id), ...r });
     },
-    async listPredictions(league) { return new Map([...predictions].filter(([, p]) => p.league === league)); },
-    async listGradedIds(league) { return new Set([...grades.values()].filter((g) => g.league === league).map((g) => g.game_id)); },
+    async getPredictions(ids) { return new Map(ids.filter((id) => predictions.has(id)).map((id) => [id, predictions.get(id)])); },
+    async getGradedIds(ids) { return new Set(ids.filter((id) => grades.has(id))); },
     async insertGrades(rows) { for (const r of rows) if (!grades.has(r.game_id)) grades.set(r.game_id, r); },
-    async upsertRatings(rows) { for (const r of rows) ratings.set(r.team_id, r); },
     async logRun(row) { runs.push(row); },
 
     // What the phone app reads, in the same shape the database gives it.
     snapshot(now = new Date()) {
-      const cutoff = new Date(now - 10 * 864e5).toISOString();
+      const from = new Date(now - 4 * 864e5).toISOString(), to = new Date(now.getTime() + 8 * 864e5).toISOString();
       return {
         games: [...games.values()]
-          .filter((g) => g.start_time >= cutoff)
+          .filter((g) => g.start_time >= from && g.start_time <= to)
           .sort((a, b) => a.start_time.localeCompare(b.start_time))
           .map((g) => ({
             ...g,
@@ -60,6 +67,6 @@ export function createMemoryStore() {
         last_run: runs.at(-1)?.finished_at || null,
       };
     },
-    _raw: { teams, games, predictions, grades, ratings, runs },
+    _raw: { teams, games, predictions, grades, ratingState, rated, runs },
   };
 }

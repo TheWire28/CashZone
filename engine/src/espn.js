@@ -2,11 +2,16 @@
 // It is unofficial, so everything that touches its shape lives in this file.
 const BASE = 'https://site.api.espn.com/apis/site/v2/sports';
 
+// params: { year, type, week } for week-based leagues, { date: 'YYYYMMDD' | 'YYYYMM' } for
+// day-based ones, plus { group } for college divisions. The feed rejects date ranges.
 export async function fetchScoreboard(lg, params = {}, fetchJson = defaultFetchJson) {
   const qs = new URLSearchParams();
-  if (params.year) qs.set('dates', String(params.year));
+  if (params.date) qs.set('dates', String(params.date));
+  else if (params.year) qs.set('dates', String(params.year));
   if (params.type) qs.set('seasontype', String(params.type));
   if (params.week) qs.set('week', String(params.week));
+  if (params.group) qs.set('groups', String(params.group));
+  if (lg.limit) qs.set('limit', String(lg.limit));
   const q = qs.toString();
   return fetchJson(`${BASE}/${lg.espnPath}/scoreboard${q ? `?${q}` : ''}`);
 }
@@ -33,7 +38,11 @@ export function normalizeEvent(lg, e) {
   const away = c?.competitors?.find((x) => x.homeAway === 'away');
   const type = e?.season?.type;
   if (!c || !home?.team?.id || !away?.team?.id || !e.id || !e.date) return null;
-  if (type !== 2 && type !== 3) return null; // regular season and playoffs only
+  if (!(lg.seasonTypes || [2, 3]).includes(type)) return null; // no preseason
+  if (c.type?.abbreviation === 'ALLSTAR') return null;           // exhibition teams
+  // College: a team with no conference is outside the division we rate (e.g. a
+  // Division II opponent). Those games would distort the ratings, so skip them.
+  if (lg.requireConference && !(home.team.conferenceId && away.team.conferenceId)) return null;
 
   const st = e.status?.type || {};
   const status = st.completed ? 'final' : st.state === 'in' ? 'in_progress' : st.state === 'pre' ? 'scheduled' : 'canceled';
@@ -61,7 +70,7 @@ export function normalizeEvent(lg, e) {
     away_score: live ? num(away.score) : null,
     neutral_site: !!c.neutralSite,
     venue: c.venue?.fullName || null,
-    // Not a database column: the betting line, only meaningful before kickoff.
+    // Not a database column: the betting line, only meaningful before the game starts.
     line: { spreadHome: num(odds.spread), total: num(odds.overUnder) },
   };
   if (status === 'final' && (game.home_score === null || game.away_score === null)) return null;
