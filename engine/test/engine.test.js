@@ -137,3 +137,68 @@ test('day leagues: first run loads history, later runs ask only for nearby days'
   await sync(LEAGUES.nba, store, { now: new Date(now.getTime() + 30 * 60e3), fetchJson });
   assert.deepEqual(asked.sort(), ['20261115', '20261116', '20261117', '20261118', '20261119'], 'yesterday through three days ahead, in US Eastern days');
 });
+
+import { dvpRows } from '../src/box.js';
+
+const box = (teams) => ({ boxscore: { players: teams } });
+
+test('DvP basketball: each defense is charged with what the other team scored, by position', () => {
+  const labels = ['MIN', 'PTS', 'FG', '3PT', 'FT', 'REB', 'AST', 'TO', 'STL', 'BLK'];
+  const p = (pos, pts, threes) => ({ athlete: { position: { abbreviation: pos } }, stats: ['30', String(pts), '5-9', `${threes}-5`, '0-0', '4', '2', '1', '1', '0'] });
+  const s = box([
+    { team: { id: '1' }, statistics: [{ labels, athletes: [p('G', 20, 3), p('G', 10, 1), p('C', 12, 0), { athlete: { position: { abbreviation: 'F' } }, stats: [] }] }] },
+    { team: { id: '2' }, statistics: [{ labels, athletes: [p('F', 25, 2)] }] },
+  ]);
+  const rows = dvpRows(LEAGUES.nba, { id: 'nba:9', season: 2027 }, s);
+  const g = rows.find((r) => r.def_team === 'nba:2' && r.pos === 'G');
+  assert.equal(g.stats.pts, 30, 'both guards on team 1 count against team 2');
+  assert.equal(g.stats.fg3, 4);
+  assert.equal(g.stats.reb, 8);
+  assert.ok(!rows.some((r) => r.def_team === 'nba:2' && r.pos === 'F'), 'a player with no stats (did not play) adds nothing');
+  assert.equal(rows.find((r) => r.def_team === 'nba:1').pos, 'F');
+});
+
+test('DvP hockey: wingers grouped, goalies ignored', () => {
+  const labels = ['G', 'A', 'S', 'BS'];
+  const p = (pos, g, a, sog) => ({ athlete: { position: { abbreviation: pos } }, stats: [String(g), String(a), String(sog), '1'] });
+  const s = box([
+    { team: { id: '5' }, statistics: [{ labels, athletes: [p('LW', 1, 0, 4), p('RW', 0, 2, 3), p('D', 0, 1, 2)] }, { labels: ['GA', 'SA'], athletes: [{ athlete: { position: { abbreviation: 'G' } }, stats: ['2', '30'] }] }] },
+    { team: { id: '6' }, statistics: [] },
+  ]);
+  const rows = dvpRows(LEAGUES.nhl, { id: 'nhl:1', season: 2027 }, s);
+  const w = rows.find((r) => r.pos === 'W');
+  assert.deepEqual([w.def_team, w.stats.g, w.stats.a, w.stats.pts, w.stats.sog, w.stats.blk], ['nhl:6', 1, 2, 3, 7, 2]);
+  assert.deepEqual(rows.map((r) => r.pos).sort(), ['D', 'W']);
+});
+
+test('DvP football: positions come from the roster lookup, PPR fantasy points', () => {
+  const s = box([
+    { team: { id: '28' }, statistics: [
+      { name: 'passing', labels: ['C/ATT', 'YDS', 'TD', 'INT'], athletes: [{ athlete: { id: '10' }, stats: ['20/30', '250', '2', '1'] }] },
+      { name: 'rushing', labels: ['CAR', 'YDS', 'TD'], athletes: [{ athlete: { id: '11' }, stats: ['15', '80', '1'] }, { athlete: { id: '10' }, stats: ['3', '10', '0'] }] },
+      { name: 'receiving', labels: ['REC', 'YDS', 'TD', 'TGTS'], athletes: [{ athlete: { id: '12' }, stats: ['6', '90', '1', '9'] }, { athlete: { id: '13' }, stats: ['2', '20', '0', '3'] }, { athlete: { id: '99' }, stats: ['1', '5', '0', '1'] }] },
+    ] },
+    { team: { id: '19' }, statistics: [] },
+  ]);
+  const positions = new Map([['10', 'QB'], ['11', 'RB'], ['12', 'WR'], ['13', 'FB']]);
+  const rows = dvpRows(LEAGUES.nfl, { id: 'nfl:1', season: 2026 }, s, positions);
+  const by = Object.fromEntries(rows.map((r) => [r.pos, r]));
+  assert.equal(by.QB.def_team, 'nfl:19');
+  assert.equal(by.QB.stats.fpts, 0.04 * 250 + 4 * 2 - 2 + 0.1 * 10, 'QB passing and rushing both count');
+  assert.equal(by.RB.stats.rec, 2, 'a fullback counts as a running back');
+  assert.equal(by.WR.stats.fpts, 6 + 9 + 6);
+  assert.ok(!rows.some((r) => r.stats.rec === 1 && r.pos !== 'RB'), 'a player with no known position is left out');
+});
+
+test('walk-forward scorecard only starts in the second season and survives save/load', () => {
+  const r = new Ratings(LEAGUES.nfl);
+  const g = (season, hs, as) => ({ home_team: 'a', away_team: 'b', home_score: hs, away_score: as, neutral_site: false, season });
+  r.add(g(2025, 24, 10)); r.add(g(2025, 21, 17));
+  assert.equal(r.stats.n, 0, 'first season is not scored');
+  r.add(g(2026, 30, 20)); r.add(g(2026, 13, 27));
+  assert.equal(r.stats.n, 2);
+  assert.equal(r.stats.correct, 1, 'picked the home side both times; right once');
+  const back = Ratings.fromState(LEAGUES.nfl, JSON.parse(JSON.stringify(r.toState('nfl'))));
+  assert.deepEqual(back.stats, r.stats);
+  assert.equal(r.toState('nfl').league.config.home_edge, 1.4);
+});

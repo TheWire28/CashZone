@@ -6,6 +6,7 @@
 // normal run reads a few hundred rows no matter how much history a league has.
 import { pull } from './pull.js';
 import { Ratings, gradeGame, MODEL_VERSION } from './model.js';
+import { collectDvp } from './box.js';
 
 const DAY = 864e5;
 const byStart = (a, b) => a.start_time.localeCompare(b.start_time) || a.id.localeCompare(b.id);
@@ -53,9 +54,18 @@ export async function sync(lg, store, { now = new Date(), fetchJson, log = () =>
     .map((g) => ({ ...gradeGame(g, preds.get(g.id)), graded_at: nowIso }));
   await store.insertGrades(grades);
 
+  // Box scores for defense-vs-position. A failure here never costs the picks above.
+  let dvp = {};
+  try {
+    dvp = await collectDvp(lg, store, ratings.season, { fetchJson, log });
+  } catch (err) {
+    dvp = { dvp_error: err.message };
+    log(`[${lg.key}] DvP skipped this run: ${err.message}`);
+  }
+
   const summary = {
     league: lg.key, games_seen: fresh.games.length, games_rated: unrated.length,
-    picks_stored: picks.length, picks_graded: grades.length,
+    picks_stored: picks.length, picks_graded: grades.length, ...dvp,
   };
   await store.logRun({ job: `sync:${lg.key}`, started_at: started, finished_at: new Date().toISOString(), ok: true, detail: summary });
   return summary;

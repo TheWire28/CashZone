@@ -8,6 +8,13 @@ export const MODEL_VERSION = 'elo-pts-v2';
 
 const round1 = (x) => Math.round(x * 10) / 10;
 
+// Running scorecard of how the model did on every game, each predicted before it was
+// counted. Only games from the second loaded season on are scored, so the model has
+// a prior season behind it, as it does for live picks.
+export function emptyStats() {
+  return { seasons: 0, n: 0, decided: 0, correct: 0, brier: 0, abs_margin: 0, abs_total: 0, home_wins: 0, buckets: {} };
+}
+
 export function fairAmericanOdds(p) {
   const q = Math.min(Math.max(p, 0.01), 0.99);
   return q >= 0.5 ? -Math.round((100 * q) / (1 - q)) : Math.round((100 * (1 - q)) / q);
@@ -20,6 +27,7 @@ export class Ratings {
     this.season = null;
     this.lgPts = 0;
     this.lgN = 0;
+    this.stats = emptyStats();
   }
 
   team(id) {
@@ -93,13 +101,37 @@ export class Ratings {
 
   // Call before predicting or adding a game so a new season is handled once.
   ensureSeason(season) {
-    if (this.season !== null && season !== this.season) this.rollover();
+    if (this.season === null) this.stats.seasons = Math.max(this.stats.seasons, 1);
+    else if (season !== this.season) { this.rollover(); this.stats.seasons += 1; }
     this.season = season;
+  }
+
+  score(g) {
+    const { cfg, stats: s } = this;
+    if (s.seasons < 2) return;
+    if (Math.min(this.team(g.home_team).games, this.team(g.away_team).games) < (cfg.minGames || 0)) return;
+    const p = this.predict(g);
+    const margin = g.home_score - g.away_score;
+    const homeWon = margin > 0 ? 1 : margin < 0 ? 0 : 0.5;
+    s.n += 1;
+    s.brier += (p.home_win_prob - homeWon) ** 2;
+    s.abs_margin += Math.abs((p.proj_home - p.proj_away) - margin);
+    s.abs_total += Math.abs((p.proj_home + p.proj_away) - (g.home_score + g.away_score));
+    if (margin > 0) s.home_wins += 1;
+    if (margin !== 0) {
+      const right = (margin > 0 ? g.home_team : g.away_team) === p.pick_winner;
+      s.decided += 1;
+      if (right) s.correct += 1;
+      const key = String(Math.min(Math.floor(p.confidence * 10) * 10, 90));
+      const b = (s.buckets[key] ||= [0, 0, 0]); // games, correct, sum of confidence
+      b[0] += 1; if (right) b[1] += 1; b[2] += p.confidence;
+    }
   }
 
   add(g) {
     const { cfg } = this;
     this.ensureSeason(g.season);
+    this.score(g);
     const h = this.team(g.home_team), a = this.team(g.away_team);
     const diff = this.eloDiff(g);
     const expected = 1 / (1 + 10 ** (-diff / 400));
@@ -119,7 +151,15 @@ export class Ratings {
   toState(league) {
     const lg = this.leagueAvg();
     return {
-      league: { season: this.season, lg_pts: this.lgPts, lg_n: this.lgN },
+      league: {
+        season: this.season, lg_pts: this.lgPts, lg_n: this.lgN,
+        stats: this.stats,
+        model_version: MODEL_VERSION,
+        config: {
+          k: this.cfg.k, hfa: this.cfg.hfa, elo_per_point: this.cfg.eloPerPoint, regress: this.cfg.regress,
+          home_edge: round1(this.cfg.hfa / this.cfg.eloPerPoint),
+        },
+      },
       teams: [...this.teams.entries()].map(([team_id, t]) => ({
         team_id, league,
         rating: Math.round(t.elo * 1000) / 1000,
@@ -136,6 +176,9 @@ export class Ratings {
     r.season = state.league.season ?? null;
     r.lgPts = Number(state.league.lg_pts) || 0;
     r.lgN = Number(state.league.lg_n) || 0;
+    if (state.league.stats) r.stats = { ...emptyStats(), ...state.league.stats, buckets: { ...(state.league.stats.buckets || {}) } };
+    // Ratings saved before the scorecard existed already have history behind them: score from now on.
+    else if (state.teams?.length) r.stats.seasons = 2;
     for (const t of state.teams || []) {
       r.teams.set(t.team_id, { elo: Number(t.rating), pf: Number(t.pf) || 0, pa: Number(t.pa) || 0, n: Number(t.n) || 0, games: t.games || 0 });
     }
