@@ -1,65 +1,81 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LEAGUES, loadBoard, type Board, type Game, type LeagueKey, type RecordRow, type Team } from './data';
+import { useEffect, useState } from 'react';
+import { LEAGUES, leagueInfo, loadBoard, type LeagueKey } from './data';
+import { LoadState, Notice, clockFmt, dayFmt, useLoad } from './ui';
+import { BoardView } from './pages/Board';
+import { RecordView } from './pages/Record';
+import { SpreadsView } from './pages/Spreads';
+import { ModelsView } from './pages/Models';
+import { InsightsView } from './pages/Insights';
+import { DvpView } from './pages/Dvp';
+import { PbpView } from './pages/Pbp';
+import { GameView } from './pages/Game';
 
-type Tab = 'board' | 'record';
-type Sort = 'time' | 'confidence';
+const PAGES = [
+  { key: 'board', label: 'Board', icon: 'M4 5h16v4H4zM4 11h16v4H4zM4 17h10v3H4z' },
+  { key: 'spreads', label: 'Spreads', icon: 'M4 18 9 12l4 3 7-9M15 6h5v5' },
+  { key: 'record', label: 'Record', icon: 'M5 20V10M12 20V4M19 20v-7' },
+  { key: 'models', label: 'Models', icon: 'M12 3 20 7.5v9L12 21 4 16.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5' },
+  { key: 'insights', label: 'Insights', icon: 'M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z' },
+  { key: 'dvp', label: 'DvP', icon: 'M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z' },
+  { key: 'pbp', label: 'PBP', icon: 'M6 4h12M6 9h12M6 14h8M6 19h5' },
+] as const;
+type PageKey = (typeof PAGES)[number]['key'];
+type Route = { page: PageKey } | { page: 'game'; id: string };
 
-const timeFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
-const dayFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
-const clockFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-const odds = (n: number) => (n > 0 ? `+${n}` : `${n}`);
-const line = (n: number) => (n === 0 ? 'PK' : n > 0 ? `+${n}` : `${n}`);
-const pct = (p: number) => `${Math.round(p * 100)}%`;
-const one = (n: number) => n.toFixed(1);
+function readRoute(): Route {
+  const h = decodeURIComponent(window.location.hash.replace(/^#\/?/, ''));
+  if (h.startsWith('game/')) return { page: 'game', id: h.slice(5) };
+  const p = PAGES.find((x) => x.key === h);
+  return { page: p ? p.key : 'board' };
+}
 
 function savedLeague(): LeagueKey {
   try {
     const v = localStorage.getItem('cz-league');
     if (LEAGUES.some((l) => l.key === v)) return v as LeagueKey;
-  } catch { /* private mode: just use the default */ }
+  } catch { /* private mode: use the default */ }
   return 'nfl';
 }
 
 export default function App() {
-  const [board, setBoard] = useState<Board | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>('board');
+  const [route, setRoute] = useState<Route>(readRoute);
   const [league, setLeague] = useState<LeagueKey>(savedLeague);
-  const leagueName = LEAGUES.find((l) => l.key === league)!.name;
+  const leagueName = leagueInfo(league).name;
+  const board = useLoad(() => loadBoard(league), [league]);
+
+  useEffect(() => {
+    const on = () => { setRoute(readRoute()); window.scrollTo(0, 0); };
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
+
+  // Reopening the app from the home screen should show fresh picks.
+  useEffect(() => {
+    const onShow = () => { if (document.visibilityState === 'visible') board.reload(true); };
+    document.addEventListener('visibilitychange', onShow);
+    return () => document.removeEventListener('visibilitychange', onShow);
+  }, [board.reload]);
 
   const pickLeague = (l: LeagueKey) => {
     if (l === league) return;
-    setBoard(null);
     setLeague(l);
     try { localStorage.setItem('cz-league', l); } catch { /* fine without it */ }
   };
 
-  // Only the most recent request may update the screen, so a slow answer for a
-  // league you already switched away from is ignored.
-  const latest = useRef(0);
-  const refresh = useCallback(async () => {
-    const mine = ++latest.current;
-    setLoading(true);
-    try {
-      const next = await loadBoard(league);
-      if (mine !== latest.current) return;
-      setBoard(next);
-      setError(null);
-    } catch (e) {
-      if (mine === latest.current) setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (mine === latest.current) setLoading(false);
-    }
-  }, [league]);
-
-  useEffect(() => {
-    refresh();
-    // Reopening the app from the home screen should show fresh picks.
-    const onShow = () => document.visibilityState === 'visible' && refresh();
-    document.addEventListener('visibilitychange', onShow);
-    return () => document.removeEventListener('visibilitychange', onShow);
-  }, [refresh]);
+  const needsBoard = route.page === 'board' || route.page === 'spreads' || route.page === 'record' || route.page === 'pbp';
+  const b = board.data;
+  let body;
+  if (route.page === 'game') {
+    body = <GameView id={route.id} fromBoard={b?.games.find((g) => g.id === route.id)} />;
+  } else if (needsBoard && !b) {
+    body = <main><LoadState error={board.error} loading={board.loading} what="picks" /></main>;
+  } else if (route.page === 'board') body = <BoardView key={league} board={b!} league={league} leagueName={leagueName} />;
+  else if (route.page === 'spreads') body = <SpreadsView board={b!} league={league} leagueName={leagueName} />;
+  else if (route.page === 'record') body = <RecordView board={b!} league={league} leagueName={leagueName} />;
+  else if (route.page === 'pbp') body = <PbpView board={b!} leagueName={leagueName} />;
+  else if (route.page === 'models') body = <ModelsView league={league} leagueName={leagueName} />;
+  else if (route.page === 'insights') body = <InsightsView league={league} leagueName={leagueName} />;
+  else body = <DvpView league={league} leagueName={leagueName} />;
 
   return (
     <div className="shell">
@@ -68,261 +84,44 @@ export default function App() {
           <p className="eyebrow">Prediction terminal</p>
           <h1>The Cash<span>Zone</span></h1>
         </div>
-        <button className="btn3d" onClick={refresh} disabled={loading} aria-label="Refresh picks">
-          {loading ? 'Loading…' : 'Refresh'}
+        <button className="btn3d" onClick={() => board.reload(true)} disabled={board.loading} aria-label="Refresh picks">
+          {board.loading ? 'Loading…' : 'Refresh'}
         </button>
       </header>
 
-      <nav className="leagues" aria-label="League">
-        {LEAGUES.map((l) => (
-          <button key={l.key} className={league === l.key ? 'on' : ''} aria-pressed={league === l.key} onClick={() => pickLeague(l.key)}>{l.name}</button>
-        ))}
-      </nav>
-
-      {error === 'not-configured' ? <Setup /> : null}
-      {error && error !== 'not-configured' ? (
-        <div className="card notice" role="alert">
-          <strong>Couldn’t load picks.</strong>
-          <span>{board ? 'Showing the last board that loaded. ' : ''}{error}</span>
-        </div>
+      {route.page !== 'game' ? (
+        <nav className="leagues" aria-label="League">
+          {LEAGUES.map((l) => (
+            <button key={l.key} className={league === l.key ? 'on' : ''} aria-pressed={league === l.key} onClick={() => pickLeague(l.key)}>{l.name}</button>
+          ))}
+        </nav>
       ) : null}
-      {!board && loading ? <div className="card notice">Loading the board…</div> : null}
 
-      {board && tab === 'board' ? <BoardView key={league} board={board} league={league} leagueName={leagueName} /> : null}
-      {board && tab === 'record' ? <RecordView board={board} league={league} leagueName={leagueName} /> : null}
+      {board.error && b && needsBoard ? (
+        <div className="card notice" role="alert"><strong>Couldn’t refresh.</strong><span>Showing the last board that loaded. {board.error}</span></div>
+      ) : null}
+      {board.error === 'not-configured' && route.page === 'board' ? (
+        <Notice title="Almost there.">The app isn’t connected to its database yet.</Notice>
+      ) : null}
+
+      {body}
 
       <footer className="fine">
-        {board?.last_run ? <p>Model last ran {dayFmt.format(new Date(board.last_run))} at {clockFmt.format(new Date(board.last_run))}.</p> : null}
-        <p>Informational analysis only, not betting advice. Picks lock at kickoff and are graded on the final score.</p>
+        {b?.last_run ? <p>Model last ran {dayFmt.format(new Date(b.last_run))} at {clockFmt.format(new Date(b.last_run))}.</p> : null}
+        <p>Informational analysis only, not betting advice. Picks lock at the start of each game and are graded on the final score.</p>
       </footer>
 
       <nav className="tabs" aria-label="Sections">
-        {(['board', 'record'] as Tab[]).map((t) => (
-          <button key={t} className={tab === t ? 'on' : ''} aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)}>
-            {t === 'board' ? 'Board' : 'Record'}
-          </button>
-        ))}
+        {PAGES.map((p) => {
+          const on = route.page === p.key || (route.page === 'game' && p.key === 'pbp');
+          return (
+            <a key={p.key} href={`#/${p.key}`} className={on ? 'on' : ''} aria-current={on ? 'page' : undefined}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d={p.icon} /></svg>
+              <span>{p.label}</span>
+            </a>
+          );
+        })}
       </nav>
     </div>
-  );
-}
-
-function Setup() {
-  return (
-    <div className="card notice">
-      <strong>Almost there.</strong>
-      <span>The app is running but isn’t connected to its database yet. Add <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in Netlify’s environment variables, then redeploy.</span>
-    </div>
-  );
-}
-
-function recordFor(rows: RecordRow[], market: RecordRow['market'], win: RecordRow['win'], league?: string) {
-  const hit = rows.filter((r) => r.market === market && r.win === win && (!league || r.league === league));
-  const wins = hit.reduce((s, r) => s + r.wins, 0), losses = hit.reduce((s, r) => s + r.losses, 0), pushes = hit.reduce((s, r) => s + r.pushes, 0);
-  return { wins, losses, pushes, rate: wins + losses ? wins / (wins + losses) : null };
-}
-
-const PAGE = 30;
-
-function BoardView({ board, league, leagueName }: { board: Board; league: LeagueKey; leagueName: string }) {
-  const [sort, setSort] = useState<Sort>('time');
-  const [showAll, setShowAll] = useState(false);
-  const upcoming = useMemo(() => {
-    // A game still marked "scheduled" long after its start time was postponed; leave it off.
-    const cutoff = new Date(Date.now() - 6 * 3600e3).toISOString();
-    const list = board.games.filter((g) => (g.status === 'scheduled' || g.status === 'in_progress') && g.prediction && g.start_time > cutoff);
-    return sort === 'time' ? list : [...list].sort((a, b) => b.prediction!.confidence - a.prediction!.confidence);
-  }, [board, sort]);
-  const results = useMemo(() => board.games.filter((g) => g.status === 'final' && g.prediction && g.grade).reverse(), [board]);
-  const windows: RecordRow['win'][] = ['7d', '30d', '90d', 'all'];
-  const all = recordFor(board.record, 'winner', 'all', league);
-  const anyGraded = all.wins + all.losses > 0;
-  const shown = showAll ? upcoming : upcoming.slice(0, PAGE);
-
-  return (
-    <main>
-      <section aria-labelledby="h-check">
-        <h2 id="h-check">How the model is doing · {leagueName}</h2>
-        {anyGraded ? (
-          <div className="stats">
-            {windows.map((w) => {
-              const r = recordFor(board.record, 'winner', w, league);
-              return (
-                <div className="card stat" key={w}>
-                  <span className="label">{w === 'all' ? 'All time' : `Last ${w.replace('d', ' days')}`}</span>
-                  <span className="big">{r.rate === null ? '—' : pct(r.rate)}</span>
-                  <span className="sub">{r.wins}-{r.losses} winners</span>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="card notice">
-            <strong>The record starts clean.</strong>
-            <span>Every {leagueName} pick below is stored before the game starts. Results show up here as soon as the first one goes final.</span>
-          </div>
-        )}
-      </section>
-
-      <section aria-labelledby="h-next">
-        <div className="row">
-          <h2 id="h-next">Next up · {leagueName}</h2>
-          <div className="seg" role="group" aria-label="Sort games">
-            <button className={sort === 'time' ? 'on' : ''} aria-pressed={sort === 'time'} onClick={() => setSort('time')}>Time</button>
-            <button className={sort === 'confidence' ? 'on' : ''} aria-pressed={sort === 'confidence'} onClick={() => setSort('confidence')}>Confidence</button>
-          </div>
-        </div>
-        {upcoming.length ? (
-          <>
-            <div className="grid">{shown.map((g) => <GameCard key={g.id} g={g} />)}</div>
-            {upcoming.length > PAGE && !showAll ? (
-              <p className="more"><button className="btn3d" onClick={() => setShowAll(true)}>Show all {upcoming.length} games</button></p>
-            ) : null}
-          </>
-        ) : (
-          <div className="card notice">No upcoming {leagueName} games with picks right now. The model checks for new games every 30 minutes.</div>
-        )}
-      </section>
-
-      {results.length ? (
-        <section aria-labelledby="h-results">
-          <h2 id="h-results">Latest results</h2>
-          <div className="card list">{results.slice(0, 16).map((g) => <ResultRow key={g.id} g={g} />)}</div>
-        </section>
-      ) : null}
-    </main>
-  );
-}
-
-function Badge({ t }: { t: Team }) {
-  return <span className="badge" style={{ background: `#${t.color || '24304d'}` }}>{t.abbr}</span>;
-}
-
-function GameCard({ g }: { g: Game }) {
-  const p = g.prediction!;
-  const homePick = p.pick_winner === g.home_team;
-  const pick = homePick ? g.home : g.away;
-  const margin = Math.abs(p.proj_home - p.proj_away);
-  const leader = p.proj_home >= p.proj_away ? g.home : g.away;
-  const spreadTeam = p.pick_spread ? (p.pick_spread === g.home_team ? g.home : g.away) : null;
-  const spreadNum = p.market_spread_home === null ? null : p.pick_spread === g.home_team ? p.market_spread_home : -p.market_spread_home;
-  const side = (t: Team, prob: number, proj: number, picked: boolean) => (
-    <div className={`side ${picked ? 'picked' : ''}`}>
-      <Badge t={t} />
-      <span className="name">{t.short_name || t.name}</span>
-      <span className="prob">{pct(prob)}</span>
-      <span className="proj">{one(proj)}</span>
-    </div>
-  );
-
-  return (
-    <article className="card game">
-      <div className="meta">
-        <span>{g.status === 'in_progress' ? 'In progress' : timeFmt.format(new Date(g.start_time))}{g.neutral_site ? ' · neutral site' : ''}</span>
-        <span className={`conf ${p.confidence >= 0.7 ? 'hi' : ''}`}>{pct(p.confidence)} confidence</span>
-      </div>
-      <div className="cols"><span>Win chance</span><span>Proj.</span></div>
-      {side(g.away, 1 - p.home_win_prob, p.proj_away, !homePick)}
-      {side(g.home, p.home_win_prob, p.proj_home, homePick)}
-      <div className="bar" aria-hidden="true"><i style={{ width: pct(1 - p.home_win_prob) }} /></div>
-
-      <dl className="picks">
-        <div>
-          <dt>Winner</dt>
-          <dd><b>{pick.abbr}</b> · fair price {odds(p.fair_odds)}</dd>
-        </div>
-        <div>
-          <dt>{g.league === 'nhl' ? 'Puck line' : 'Spread'}</dt>
-          <dd>{spreadTeam && spreadNum !== null ? <><b>{spreadTeam.abbr} {line(spreadNum)}</b> · model {margin < 0.05 ? 'even' : `${leader.abbr} by ${one(margin)}`}</> : <span className="muted">{p.market_spread_home === null ? 'No line yet' : `No edge at ${g.home.abbr} ${line(p.market_spread_home)}`} · model {leader.abbr} by {one(margin)}</span>}</dd>
-        </div>
-        <div>
-          <dt>Total</dt>
-          <dd>{p.pick_total && p.market_total !== null ? <><b>{p.pick_total === 'over' ? 'Over' : 'Under'} {p.market_total}</b> · model {one(p.proj_home + p.proj_away)}</> : <span className="muted">{p.market_total === null ? 'No line yet' : `No edge at ${p.market_total}`} · model {one(p.proj_home + p.proj_away)}</span>}</dd>
-        </div>
-      </dl>
-      <p className="hint">Only worth a bet on {pick.abbr} at a better price than {odds(p.fair_odds)}.</p>
-    </article>
-  );
-}
-
-function Mark({ r }: { r: 'win' | 'loss' | 'push' | null }) {
-  if (!r) return <span className="mark none">—</span>;
-  return <span className={`mark ${r}`}>{r === 'win' ? 'W' : r === 'loss' ? 'L' : 'P'}</span>;
-}
-
-function ResultRow({ g }: { g: Game }) {
-  const p = g.prediction!, gr = g.grade!;
-  const pick = p.pick_winner === g.home_team ? g.home : g.away;
-  return (
-    <div className="result">
-      <span className="when">{dayFmt.format(new Date(g.start_time))}</span>
-      <span className="score">{g.away.abbr} {g.away_score} @ {g.home.abbr} {g.home_score}</span>
-      <span className="picked">Pick {pick.abbr}</span>
-      <span className="marks" aria-label="Winner, spread, total">
-        <Mark r={gr.winner_correct === null ? 'push' : gr.winner_correct ? 'win' : 'loss'} />
-        <Mark r={gr.spread_result} />
-        <Mark r={gr.total_result} />
-      </span>
-    </div>
-  );
-}
-
-function RecordView({ board, league, leagueName }: { board: Board; league: LeagueKey; leagueName: string }) {
-  const markets: [RecordRow['market'], string][] = [['winner', 'Winner'], ['spread', 'Spread'], ['total', 'Total']];
-  const windows: [RecordRow['win'], string][] = [['7d', '7 days'], ['30d', '30 days'], ['90d', '90 days'], ['all', 'All time']];
-  const results = board.games.filter((g) => g.status === 'final' && g.prediction && g.grade).reverse();
-  return (
-    <main>
-      <section aria-labelledby="h-rec">
-        <h2 id="h-rec">Track record · {leagueName}</h2>
-        <div className="card tablewrap">
-          <table>
-            <thead>
-              <tr><th scope="col">Market</th>{windows.map(([, l]) => <th scope="col" key={l}>{l}</th>)}</tr>
-            </thead>
-            <tbody>
-              {markets.map(([m, label]) => (
-                <tr key={m}>
-                  <th scope="row">{label}</th>
-                  {windows.map(([w]) => {
-                    const r = recordFor(board.record, m, w, league);
-                    return (
-                      <td key={w}>
-                        <b>{r.wins}-{r.losses}{r.pushes ? `-${r.pushes}` : ''}</b>
-                        <small>{r.rate === null ? 'no picks yet' : pct(r.rate)}</small>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-              <tr>
-                <th scope="row">All leagues, winner</th>
-                {windows.map(([w]) => {
-                  const r = recordFor(board.record, 'winner', w);
-                  return (
-                    <td key={w}>
-                      <b>{r.wins}-{r.losses}</b>
-                      <small>{r.rate === null ? 'no picks yet' : pct(r.rate)}</small>
-                    </td>
-                  );
-                })}
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p className="hint">Spread and total picks need to win about 52.4% of the time to break even at standard −110 pricing.</p>
-      </section>
-      <section aria-labelledby="h-graded">
-        <h2 id="h-graded">Recently graded · {leagueName}</h2>
-        {results.length ? (
-          <div className="card list">
-            <div className="result head"><span>Date</span><span>Final</span><span>Pick</span><span className="marks"><i>W</i><i>S</i><i>T</i></span></div>
-            {results.slice(0, 60).map((g) => <ResultRow key={g.id} g={g} />)}
-          </div>
-        ) : (
-          <div className="card notice">Nothing graded yet. The first results land after the next game goes final.</div>
-        )}
-      </section>
-    </main>
   );
 }

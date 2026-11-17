@@ -12,6 +12,18 @@ Model picks, fair odds and a public record of how they did. Installable on your 
 
 Each league's settings (how fast ratings move, home edge, points per rating point) were fitted on last season's and this season's results. On those same games the model picked the straight-up winner about 67% of the time in the NFL, 70% in college football, 58% in the NHL, 69% in the NBA and 69% in college basketball. Those figures are a little flattering because the settings were tuned on the games they are measured on; the live record in the app is the honest number. Spread and total picks have no backtest (the feed does not keep old lines), and the model is weakest on lopsided college matchups.
 
+## Pages
+
+| Page | What it shows |
+|---|---|
+| **Board** | Upcoming games with win chance, projected score, fair price and spread/total leans |
+| **Spreads** | Every posted line next to the model's number, sorted by the size of the gap |
+| **Record** | Graded results by market and time window |
+| **Models** | How the model works, its record on past games, and power rankings |
+| **Insights** | Whether the percentages can be trusted (calibration), league trends, most confident picks and biggest gaps across all leagues |
+| **DvP** | What each defense allows per game to each opposing position (NFL, NHL, NBA, NCAAB; college football box scores don't list positions) |
+| **PBP** | Live and recent games; each opens a full breakdown with linescore, leaders and play-by-play straight from the feed |
+
 ## How a pick is made
 
 1. **Pull** schedules, scores and the current betting line from ESPN's public scoreboard feed.
@@ -24,7 +36,7 @@ Each league's settings (how fast ratings move, home edge, points per rating poin
 
 ### 1. Supabase (database)
 1. Create a project at supabase.com.
-2. Open **SQL Editor** and run each file in `supabase/migrations/` in order (`001_init.sql`, then `002_leagues.sql`).
+2. Open **SQL Editor** and run each file in `supabase/migrations/` in order (`001_init.sql`, `002_leagues.sql`, `003_pages.sql`).
 3. Open **Project Settings → API** and keep the page open. You need the Project URL, the `anon` public key and the `service_role` secret key.
 
 ### 2. Render (the engine)

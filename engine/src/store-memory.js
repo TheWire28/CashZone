@@ -30,6 +30,9 @@ export function recordRows(games, grades, now = new Date()) {
 export function createMemoryStore() {
   const teams = new Map(), games = new Map(), predictions = new Map(), grades = new Map();
   const ratingState = new Map(), rated = new Set();
+  const boxed = new Set(), dvp = new Map(), players = new Map();
+  const unboxed = (league, season) => [...games.values()]
+    .filter((g) => g.league === league && g.season === season && g.status === 'final' && !boxed.has(g.id));
   const runs = [];
   const inLeague = (league) => [...games.values()].filter((g) => g.league === league);
   return {
@@ -49,6 +52,18 @@ export function createMemoryStore() {
     async getPredictions(ids) { return new Map(ids.filter((id) => predictions.has(id)).map((id) => [id, predictions.get(id)])); },
     async getGradedIds(ids) { return new Set(ids.filter((id) => grades.has(id))); },
     async insertGrades(rows) { for (const r of rows) if (!grades.has(r.game_id)) grades.set(r.game_id, r); },
+    async listUnboxedFinals(league, season, limit) {
+      return unboxed(league, season).sort((a, b) => b.start_time.localeCompare(a.start_time)).slice(0, limit);
+    },
+    async countUnboxedFinals(league, season) { return unboxed(league, season).length; },
+    async saveDvp(rows, gameIds) {
+      for (const r of rows) dvp.set(`${r.game_id}|${r.def_team}|${r.pos}`, r);
+      for (const id of gameIds) boxed.add(id);
+    },
+    async getPlayerPositions(league, ids) {
+      return new Map(ids.filter((id) => players.has(`${league}:${id}`)).map((id) => [id, players.get(`${league}:${id}`).pos]));
+    },
+    async upsertPlayers(rows) { for (const r of rows) players.set(r.id, r); },
     async logRun(row) { runs.push(row); },
 
     // What the phone app reads, in the same shape the database gives it.
@@ -67,6 +82,6 @@ export function createMemoryStore() {
         last_run: runs.at(-1)?.finished_at || null,
       };
     },
-    _raw: { teams, games, predictions, grades, ratingState, rated, runs },
+    _raw: { teams, games, predictions, grades, ratingState, rated, runs, boxed, dvp, players },
   };
 }

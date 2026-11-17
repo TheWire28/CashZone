@@ -82,6 +82,39 @@ export function createSupabaseStore({ url, serviceKey }) {
       return new Set((await byIds('grades', 'game_id', ids)).map((g) => g.game_id));
     },
     insertGrades: (rows) => upsert('grades', rows, 'game_id', { ignoreDuplicates: true }),
+    listUnboxedFinals: async (league, season, limit) => (check(
+      await db.from('games').select(GAME_COLS).eq('league', league).eq('season', season)
+        .eq('status', 'final').eq('boxed', false).order('start_time', { ascending: false }).limit(limit),
+      'read unboxed games',
+    ).data),
+    async countUnboxedFinals(league, season) {
+      const { count } = check(
+        await db.from('games').select('id', { count: 'exact', head: true })
+          .eq('league', league).eq('season', season).eq('status', 'final').eq('boxed', false),
+        'count unboxed games',
+      );
+      return count || 0;
+    },
+    // Lines first, then the "read" flag: if the run dies in between, the next run just
+    // reads those box scores again and overwrites the same rows.
+    async saveDvp(rows, gameIds) {
+      await upsert('dvp_lines', rows, 'game_id,def_team,pos');
+      for (let i = 0; i < gameIds.length; i += ID_CHUNK) {
+        check(await db.from('games').update({ boxed: true }).in('id', gameIds.slice(i, i + ID_CHUNK)), 'mark games boxed');
+      }
+    },
+    async getPlayerPositions(league, ids) {
+      const out = new Map();
+      for (let i = 0; i < ids.length; i += ID_CHUNK) {
+        const { data } = check(
+          await db.from('players').select('id,pos').in('id', ids.slice(i, i + ID_CHUNK).map((id) => `${league}:${id}`)),
+          'read players',
+        );
+        for (const p of data) out.set(p.id.split(':')[1], p.pos);
+      }
+      return out;
+    },
+    upsertPlayers: (rows) => upsert('players', rows, 'id'),
     async logRun(row) { check(await db.from('runs').insert(row), 'write runs'); },
   };
 }
