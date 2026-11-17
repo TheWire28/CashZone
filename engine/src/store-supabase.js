@@ -59,7 +59,7 @@ export function createSupabaseStore({ url, serviceKey }) {
       'read unrated games',
     ),
     async loadRatingState(league) {
-      const { data } = check(await db.from('league_state').select('season,lg_pts,lg_n').eq('league', league).maybeSingle(), 'read league_state');
+      const { data } = check(await db.from('league_state').select('season,lg_pts,lg_n,stats,config').eq('league', league).maybeSingle(), 'read league_state');
       if (!data) return null;
       const teams = await pages(
         () => db.from('team_ratings').select('team_id,rating,games,pf,pa,n').eq('league', league).order('team_id'),

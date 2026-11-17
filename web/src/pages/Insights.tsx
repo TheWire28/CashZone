@@ -10,9 +10,12 @@ function historyBuckets(s: Stats | null | undefined): Bucket[] {
     .filter((b) => b.games >= 5)
     .sort((a, b) => a.key - b.key);
 }
+// A confidence level needs a handful of graded picks before its win rate means anything.
+const MIN_LIVE = 10;
 function liveBuckets(rows: CalibrationRow[]): Bucket[] {
   return rows
     .map((r) => ({ key: r.bucket, games: Number(r.games), said: Number(r.avg_conf), won: Number(r.correct) / Number(r.games) }))
+    .filter((b) => b.games >= MIN_LIVE)
     .sort((a, b) => a.key - b.key);
 }
 
@@ -64,6 +67,7 @@ export function InsightsView({ league, leagueName }: { league: LeagueKey; league
   const { state, calibration, upcoming } = data;
   const hist = historyBuckets(state?.stats);
   const live = liveBuckets(calibration);
+  const gradedSoFar = calibration.reduce((s, r) => s + Number(r.games), 0);
   const unit = league === 'nhl' ? 'goals' : 'points';
 
   const confident = [...upcoming].sort((a, b) => b.prediction!.confidence - a.prediction!.confidence).slice(0, 8);
@@ -95,6 +99,8 @@ export function InsightsView({ league, leagueName }: { league: LeagueKey; league
         <p className="hint lead">When the model says 70%, a well-calibrated model wins about 70% of those games. Bars near their tick mean the percentages are honest.</p>
         {live.length ? (
           <div className="card pad"><h3>Live picks</h3><CalibrationChart buckets={live} label={`${leagueName} live picks: model confidence vs how often it won`} /></div>
+        ) : gradedSoFar ? (
+          <p className="hint">Live picks: {gradedSoFar} graded so far. Each confidence level shows up here once it has {MIN_LIVE} graded picks.</p>
         ) : null}
         {hist.length ? (
           <div className="card pad">

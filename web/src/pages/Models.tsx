@@ -50,7 +50,7 @@ export function ModelsView({ league, leagueName }: { league: LeagueKey; leagueNa
             <p className="hint">Each game was predicted with only the games before it, starting from the second season loaded. The settings were tuned on these same games, so treat this as a little flattering; the Record page is the honest number.</p>
           </>
         ) : (
-          <Notice>The scorecard fills in after the next model run.</Notice>
+          <Notice>The scorecard is still being built. It fills in after the next model run.</Notice>
         )}
       </section>
 
