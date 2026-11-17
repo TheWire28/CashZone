@@ -294,3 +294,9 @@ td.tough { color: var(--red); font-weight: 800; }
 .play .txt { color: var(--dim); }
 .play .sc { grid-column: 3; font-size: 12px; font-weight: 800; color: var(--green); font-variant-numeric: tabular-nums; }
 .plays li.scoring .txt { color: var(--ink); font-weight: 600; }
+
+/* Netlify's free plan adds a "Powered by Netlify" badge (an iframe fixed to the bottom-right
+   corner) that would sit on top of the bottom bar. Lift it so it floats just above the bar. */
+#nl-badge-frame { bottom: calc(env(safe-area-inset-bottom) + 66px) !important; }
+@media (min-width: 760px) { #nl-badge-frame { bottom: 8px !important; } }
+.shell { padding-bottom: calc(env(safe-area-inset-bottom) + 140px); }
