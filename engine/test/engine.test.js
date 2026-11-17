@@ -92,7 +92,9 @@ test('sync: picks lock at kickoff and are graded once the game is final', async 
   const snap = store.snapshot(new Date('2026-11-23T02:00Z'));
   assert.deepEqual(snap.record.find((r) => r.market === 'winner' && r.win === 'all'), { league: 'nfl', win: 'all', market: 'winner', wins: 1, losses: 0, pushes: 0 });
 
+  const before = store._raw.ratingState.get('nfl').league.stats;
   const again = await sync(lg, store, { now: new Date('2026-11-23T03:00Z'), fetchJson });
+  assert.deepEqual(store._raw.ratingState.get('nfl').league.stats, before, 'the scorecard survives a run with nothing new to rate');
   assert.equal(again.picks_graded, 0, 'a game is graded only once');
   assert.equal(again.games_rated, 0, 'a game is rated only once');
 });

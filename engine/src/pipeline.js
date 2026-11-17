@@ -22,10 +22,14 @@ export async function sync(lg, store, { now = new Date(), fetchJson, log = () =>
   await store.upsertGames(fresh.games.map(({ line, ...row }) => row));
 
   // Ratings: load where we left off, apply finished games not yet counted, save.
-  const ratings = Ratings.fromState(lg, await store.loadRatingState(lg.key));
+  const saved = await store.loadRatingState(lg.key);
+  const ratings = Ratings.fromState(lg, saved);
   const unrated = (await store.listUnratedFinals(lg.key)).sort(byStart);
   for (const g of unrated) ratings.add(g);
-  if (unrated.length) await store.saveRatingState(lg.key, ratings.toState(lg.key), unrated.map((g) => g.id));
+  // Also save when the stored state predates the scorecard, so the Models page has its settings.
+  if (unrated.length || (saved && !saved.league?.config)) {
+    await store.saveRatingState(lg.key, ratings.toState(lg.key), unrated.map((g) => g.id));
+  }
 
   // Picks: only for games that have not started. Once a game starts its pick is never
   // touched again, which is what makes the record trustworthy.
