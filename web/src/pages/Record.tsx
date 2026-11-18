@@ -1,6 +1,7 @@
 import type { Board, LeagueKey, RecordRow } from '../data';
 import { Notice, pct, recordFor } from '../ui';
 import { ResultRow } from './Board';
+import { ConfidenceRecord } from './Confidence';
 
 export function RecordView({ board, league, leagueName }: { board: Board; league: LeagueKey; leagueName: string }) {
   const markets: [RecordRow['market'], string][] = [['winner', 'Winner'], ['spread', league === 'nhl' ? 'Puck line' : 'Spread'], ['total', 'Total']];
@@ -37,6 +38,7 @@ export function RecordView({ board, league, leagueName }: { board: Board; league
         </div>
         <p className="hint">Spread and total picks need to win about 52.4% of the time to break even at standard −110 pricing.</p>
       </section>
+      <ConfidenceRecord board={board} league={league} leagueName={leagueName} />
       <section aria-labelledby="h-graded">
         <h2 id="h-graded">Recently graded · {leagueName}</h2>
         {results.length ? (

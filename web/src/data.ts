@@ -21,7 +21,12 @@ export type Game = {
   home: Team; away: Team; prediction: Prediction | null; grade: Grade | null;
 };
 export type RecordRow = { league: string; win: '7d' | '30d' | '90d' | 'all'; market: 'winner' | 'spread' | 'total'; wins: number; losses: number; pushes: number };
-export type Board = { games: Game[]; record: RecordRow[]; last_run: string | null };
+export type ConfidenceRow = { league: string; bucket: number; market: 'winner' | 'spread' | 'total'; wins: number; losses: number; pushes: number; avg_conf: number };
+export type Board = {
+  games: Game[]; record: RecordRow[]; last_run: string | null;
+  confidence: ConfidenceRow[];
+  history: { league: string; stats: Stats | null }[];
+};
 
 export type Stats = {
   seasons: number; n: number; decided: number; correct: number; brier: number;
@@ -89,22 +94,26 @@ export async function loadBoard(league: LeagueKey): Promise<Board> {
     if (import.meta.env.DEV) {
       const res = await fetch('/dev-snapshot.json');
       if (res.ok) {
-        const snap: Board = await res.json();
-        return { ...snap, games: snap.games.filter((g) => g.league === league && g.start_time >= from && g.start_time <= to) };
+        const snap: Partial<Board> & Pick<Board, 'games' | 'record' | 'last_run'> = await res.json();
+        return { confidence: snap.confidence ?? [], history: snap.history ?? [], record: snap.record, last_run: snap.last_run, games: snap.games.filter((g) => g.league === league && g.start_time >= from && g.start_time <= to) };
       }
     }
     throw new Error('not-configured');
   }
-  const [games, record, runs] = await Promise.all([
+  const [games, record, runs, confidence, history] = await Promise.all([
     db().from('games').select(GAME_SELECT)
       .eq('league', league).gte('start_time', from).lte('start_time', to).order('start_time').order('id').limit(1000),
     db().from('v_record').select('*'),
     db().from('runs').select('finished_at').eq('ok', true).order('finished_at', { ascending: false }).limit(1),
+    db().from('v_confidence_record').select('*'),
+    db().from('league_state').select('league,stats'),
   ]);
   return {
     games: must(games).map(shapeGame),
     record: must(record) as RecordRow[],
     last_run: must(runs)[0]?.finished_at ?? null,
+    confidence: (must(confidence) as any[]).map((r) => ({ ...r, wins: Number(r.wins), losses: Number(r.losses), pushes: Number(r.pushes), avg_conf: Number(r.avg_conf) })),
+    history: must(history) as Board['history'],
   };
 }
 
