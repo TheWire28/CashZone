@@ -134,7 +134,7 @@ export function ResultRow({ g }: { g: Game }) {
     <a className="result" href={`#/game/${g.id}`}>
       <span className="when">{dayFmt.format(new Date(g.start_time))}</span>
       <span className="score">{g.away.abbr} {g.away_score} @ {g.home.abbr} {g.home_score}</span>
-      <span className="picked">Pick {pick.abbr}</span>
+      <span className="picked">Pick {pick.abbr} <span className="muted">{pct(p.confidence)}</span></span>
       <span className="marks" aria-label="Winner, spread, total">
         <Mark r={gr.winner_correct === null ? 'push' : gr.winner_correct ? 'win' : 'loss'} />
         <Mark r={gr.spread_result} />
